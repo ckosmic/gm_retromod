@@ -3,3 +3,5 @@ packages
 .vs
 gm_retromod/Release
 gm_retromod/x64
+gm_retromod/handler.cpp
+gm_retromod/handler.h
