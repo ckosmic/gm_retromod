@@ -16,6 +16,7 @@
 #include <thread>
 #include <Urlmon.h>
 #include <atlbase.h>
+#include <nlohmann/json.hpp>
 #pragma comment(lib,"gdiplus.lib")
 #pragma comment(lib, "urlmon.lib")
 
@@ -25,14 +26,18 @@
 using namespace std;
 using namespace GarrysMod::Lua;
 using namespace Gdiplus;
+using json = nlohmann::json;
 
 HWND g_retroarch;
 GdiplusStartupInput g_gdiplusStartupInput;
 ULONG_PTR g_gdiplusToken;
 vector<BYTE> g_frameData;
+vector<BYTE> g_lqFrameData;
 ULONG g_streamQuality = 50L;
 bool g_usePng = false;
 bool g_downloading = false;
+bool g_captureLq = true;
+double g_aspectRatio = 1;
 
 bool IsRetroArchOpen() {
 	PROCESSENTRY32 entry;
@@ -250,7 +255,7 @@ BITMAPINFOHEADER createBitmapHeader(int width, int height)
 	return bi;
 }
 
-HBITMAP GdiPlusWindowCapture(HWND hwnd) {
+HBITMAP GdiPlusWindowCapture(HWND hwnd, int wDst = -1, int hDst = -1) {
 	HDC hwindowDC = GetDC(hwnd);
 	HDC hwindowCompatibleDC = CreateCompatibleDC(hwindowDC);
 	if (!hwindowCompatibleDC) {
@@ -263,17 +268,28 @@ HBITMAP GdiPlusWindowCapture(HWND hwnd) {
 	GetClientRect(g_retroarch, &rect);
 	int width = rect.right;
 	int height = rect.bottom;
+	g_aspectRatio = (double)width / (double)height;
+	int bmpWidth = wDst < 0 ? width : wDst;
+	int bmpHeight = hDst < 0 ? height : hDst;
 
-	HBITMAP hbwindow = CreateCompatibleBitmap(hwindowDC, width, height);
-	BITMAPINFOHEADER bi = createBitmapHeader(width, height);
+	HBITMAP hbwindow = CreateCompatibleBitmap(hwindowDC, bmpWidth, bmpHeight);
+	BITMAPINFOHEADER bi = createBitmapHeader(bmpWidth, bmpHeight);
 
 	SelectObject(hwindowCompatibleDC, hbwindow);
 
-	DWORD dwBmpSize = ((width * bi.biBitCount + 31) & ~31) * 4 * height;
+	DWORD dwBmpSize = ((bmpWidth * bi.biBitCount + 31) & ~31) * 4 * bmpHeight;
 	HANDLE hDIB = GlobalAlloc(GHND, dwBmpSize);
 	char* lpbitmap = (char*)GlobalLock(hDIB);
 
-	if (!BitBlt(hwindowCompatibleDC, 0, 0, width, height, hwindowDC, 0, 0, SRCCOPY)) {
+	bool result = false;
+	if (wDst < 0 || hDst < 0) {
+		result = BitBlt(hwindowCompatibleDC, 0, 0, width, height, hwindowDC, 0, 0, SRCCOPY);
+	}
+	else {
+		result = StretchBlt(hwindowCompatibleDC, 0, 0, wDst, hDst, hwindowDC, 0, 0, width, height, SRCCOPY);
+	}
+
+	if (!result) {
 		DeleteDC(hwindowCompatibleDC);
 		ReleaseDC(hwnd, hwindowDC);
 
@@ -341,11 +357,16 @@ bool saveToMemory(HBITMAP* hbitmap, std::vector<BYTE>& data, std::string dataFor
 LUA_FUNCTION(GrabWindowFrame) {
 	try {
 		HBITMAP hBitmap = GdiPlusWindowCapture(g_retroarch);
+
 		if (hBitmap != NULL) {
 			string format = "jpg";
+			ULONG quality = g_streamQuality;
+
 			if (g_usePng) format = "png";
 			g_frameData.clear();
-			if (saveToMemory(&hBitmap, g_frameData, format, g_streamQuality)) {
+			g_lqFrameData.clear();
+
+			if (saveToMemory(&hBitmap, g_frameData, format, quality)) {
 				LUA->PushBool(true);
 			}
 			else {
@@ -356,6 +377,13 @@ LUA_FUNCTION(GrabWindowFrame) {
 			LUA->PushBool(false);
 		}
 		DeleteObject(hBitmap);
+
+		if (g_captureLq) {
+			HBITMAP hBitmapLq = GdiPlusWindowCapture(g_retroarch, 128, 128);
+			saveToMemory(&hBitmapLq, g_lqFrameData, string("jpg"), 50L);
+			DeleteObject(hBitmapLq);
+		}
+
 	} catch (int e) {
 		g_retroarch = nullptr;
 		LUA->PushBool(false);
@@ -365,7 +393,15 @@ LUA_FUNCTION(GrabWindowFrame) {
 }
 
 LUA_FUNCTION(GetFrameBase64) {
-	string encoded = "data:image/bmp;base64," + base64_encode(g_frameData.data(), g_frameData.size(), false);
+	string encoded = "";
+	if ((int)(LUA->GetNumber(1)) == 0) {
+		string format = "jpg";
+		if (g_usePng) format = "png";
+		encoded = "data:image/" + format + ";base64," + base64_encode(g_frameData.data(), g_frameData.size(), false);
+	}
+	else if (g_captureLq) {
+		encoded = "data:image/jpg;base64," + base64_encode(g_lqFrameData.data(), g_lqFrameData.size(), false);
+	}
 	LUA->PushString(encoded.c_str());
 
 	return 1;
@@ -539,6 +575,13 @@ void SetRetroArchConfigValues(vector<string> values) {
 					changed = true;
 				}
 			}
+			if (line.find("pause_nonactive = ") != string::npos) {
+				string replaceString = "pause_nonactive = \"false\"";
+				if (strcmp(line.c_str(), replaceString.c_str()) != 0) {
+					line = replaceString;
+					changed = true;
+				}
+			}
 			cfgOut.push_back(line);
 		}
 
@@ -563,6 +606,63 @@ LUA_FUNCTION(SetRetroArchCfg) {
 	}
 	SetRetroArchConfigValues(values);
 
+	return 0;
+}
+
+LUA_FUNCTION(GetLatestContent) {
+	string chPath = "bin\\RetroArch\\content_history.lpl";
+	ifstream file(chPath);
+	json j;
+	file >> j;
+
+	string path;
+	j.at("items")[0].at("path").get_to(path);
+
+	const size_t last_slash_idx = path.find_last_of("\\/");
+	if (std::string::npos != last_slash_idx)
+	{
+		path.erase(0, last_slash_idx + 1);
+	}
+
+	// Remove extension if present.
+	const size_t period_idx = path.rfind('.');
+	if (std::string::npos != period_idx)
+	{
+		path.erase(period_idx);
+	}
+
+	LUA->PushString(path.c_str());
+
+	return 1;
+}
+
+LUA_FUNCTION(AddToolWindowStyle) {
+	LONG_PTR style = GetWindowLongPtr(g_retroarch, GWL_EXSTYLE);
+	if ((style & WS_EX_TOOLWINDOW) == 0) {
+		ShowWindow(g_retroarch, SW_HIDE);
+		SetWindowLongPtr(g_retroarch, GWL_EXSTYLE, style | WS_EX_TOOLWINDOW);
+		ShowWindow(g_retroarch, SW_SHOWNOACTIVATE);
+	}
+
+	return 0;
+}
+
+LUA_FUNCTION(SetCaptureLQ) {
+	g_captureLq = LUA->GetBool(1);
+	return 0;
+}
+
+LUA_FUNCTION(GetAspectRatio) {
+	LUA->PushNumber(g_aspectRatio);
+	return 1;
+}
+
+LUA_FUNCTION(ReinitializeRetroArchWindow) {
+	ShowWindow(g_retroarch, SW_HIDE);
+	if(LUA->GetBool(1))
+		ShowWindow(g_retroarch, SW_SHOW);
+	else
+		ShowWindow(g_retroarch, SW_SHOWNOACTIVATE);
 	return 0;
 }
 
@@ -615,6 +715,16 @@ GMOD_MODULE_OPEN()
 	LUA->SetField(-2, "OpenDownloadLink");
 	LUA->PushCFunction(SetRetroArchCfg);
 	LUA->SetField(-2, "SetRetroArchCfg");
+	LUA->PushCFunction(GetLatestContent);
+	LUA->SetField(-2, "GetLatestContent");
+	LUA->PushCFunction(AddToolWindowStyle);
+	LUA->SetField(-2, "AddToolWindowStyle");
+	LUA->PushCFunction(SetCaptureLQ);
+	LUA->SetField(-2, "SetCaptureLQ");
+	LUA->PushCFunction(GetAspectRatio);
+	LUA->SetField(-2, "GetAspectRatio");
+	LUA->PushCFunction(ReinitializeRetroArchWindow);
+	LUA->SetField(-2, "ReinitializeRetroArchWindow");
 
 	GdiplusStartup(&g_gdiplusToken, &g_gdiplusStartupInput, NULL);
 
@@ -626,6 +736,7 @@ GMOD_MODULE_OPEN()
 //
 GMOD_MODULE_CLOSE()
 {
+	CloseRetroArch(NULL);
 	GdiplusShutdown(g_gdiplusToken);
 
 	return 0;
