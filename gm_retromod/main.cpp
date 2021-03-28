@@ -22,6 +22,8 @@
 
 #include "base64.h"
 #include "dirent.h"
+#include "version.h"
+#include "githubhelper.h"
 
 using namespace std;
 using namespace GarrysMod::Lua;
@@ -38,6 +40,8 @@ bool g_usePng = false;
 bool g_downloading = false;
 bool g_captureLq = true;
 double g_aspectRatio = 1;
+
+Version g_version("1.0.0");
 
 bool IsRetroArchOpen() {
 	PROCESSENTRY32 entry;
@@ -183,8 +187,10 @@ LUA_FUNCTION(CloseRetroArch) {
 			if (_stricmp(entry.szExeFile, processName) == 0)
 			{
 				HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, entry.th32ProcessID);
-				TerminateProcess(hProcess, 1);
-				CloseHandle(hProcess);
+				if (hProcess != NULL) {
+					TerminateProcess(hProcess, 1);
+					CloseHandle(hProcess);
+				}
 			}
 		}
 	}
@@ -666,6 +672,17 @@ LUA_FUNCTION(ReinitializeRetroArchWindow) {
 	return 0;
 }
 
+void WriteVersion() {
+	ofstream versionFile("garrysmod\\data\\retromod2\\version.txt");
+	versionFile << g_version.to_string();
+	versionFile.close();
+}
+
+LUA_FUNCTION(DownloadUpdater) {
+	DownloadUpdater(GetLatestUpdaterVersion());
+	return 0;
+}
+
 
 //
 // Called when your module is opened
@@ -725,8 +742,11 @@ GMOD_MODULE_OPEN()
 	LUA->SetField(-2, "GetAspectRatio");
 	LUA->PushCFunction(ReinitializeRetroArchWindow);
 	LUA->SetField(-2, "ReinitializeRetroArchWindow");
+	LUA->PushCFunction(DownloadUpdater);
+	LUA->SetField(-2, "DownloadUpdater");
 
 	GdiplusStartup(&g_gdiplusToken, &g_gdiplusStartupInput, NULL);
+	WriteVersion();
 
 	return 0;
 }
@@ -736,7 +756,6 @@ GMOD_MODULE_OPEN()
 //
 GMOD_MODULE_CLOSE()
 {
-	CloseRetroArch(NULL);
 	GdiplusShutdown(g_gdiplusToken);
 
 	return 0;
