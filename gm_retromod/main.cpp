@@ -1,5 +1,6 @@
 #define GMMODULE
 #define _CRT_SECURE_NO_WARNINGS
+#define _SILENCE_EXPERIMENTAL_FILESYSTEM_DEPRECATION_WARNING
 
 #include <string>
 #include <fstream>
@@ -17,6 +18,7 @@
 #include <Urlmon.h>
 #include <atlbase.h>
 #include <nlohmann/json.hpp>
+#include <experimental/filesystem>
 #pragma comment(lib,"gdiplus.lib")
 #pragma comment(lib, "urlmon.lib")
 
@@ -41,7 +43,7 @@ bool g_downloading = false;
 bool g_captureLq = true;
 double g_aspectRatio = 1;
 
-Version g_version("1.0.0");
+Version g_version("1.0.1");
 
 bool IsRetroArchOpen() {
 	PROCESSENTRY32 entry;
@@ -477,15 +479,13 @@ LUA_FUNCTION(GetInfos) {
 }
 
 LUA_FUNCTION(RetroArchExists) {
-	string exe = "bin\\RetroArch\\retroarch_debug.exe";
-	
-	if (FILE* file = fopen(exe.c_str(), "r")) {
-		fclose(file);
+	if (IsRetroArchOpen()) {
 		LUA->PushBool(true);
+		return 1;
 	}
-	else {
-		LUA->PushBool(false);
-	}
+
+	string exe = "bin\\RetroArch\\retroarch.exe";
+	LUA->PushBool(std::experimental::filesystem::exists(exe));
 
 	return 1;
 }
