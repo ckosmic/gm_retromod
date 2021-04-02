@@ -560,46 +560,54 @@ LUA_FUNCTION(OpenDownloadLink) {
 
 void SetRetroArchConfigValues(vector<string> values) {
 	string cfgPath = "bin\\RetroArch\\retroarch.cfg";
-	ifstream cfgFileIn(cfgPath);
+	if (std::experimental::filesystem::exists(cfgPath)) {
+		ifstream cfgFileIn(cfgPath);
 
-	if (cfgFileIn.is_open()) {
-		string line;
-		bool changed = false;
-		vector<string> cfgOut;
-		while (getline(cfgFileIn, line)) {
-			if (line.find("video_window_opacity = ") != string::npos) {
-				string replaceString = "video_window_opacity = " + values[0];
-				if (strcmp(line.c_str(), replaceString.c_str()) != 0) {
-					line = replaceString;
-					changed = true;
+		if (cfgFileIn.is_open()) {
+			string line;
+			bool changed = false;
+			vector<string> cfgOut;
+			while (getline(cfgFileIn, line)) {
+				if (line.find("video_window_opacity = ") != string::npos) {
+					string replaceString = "video_window_opacity = " + values[0];
+					if (strcmp(line.c_str(), replaceString.c_str()) != 0) {
+						line = replaceString;
+						changed = true;
+					}
+				}
+				if (line.find("video_scale = ") != string::npos) {
+					string replaceString = "video_scale = " + values[1];
+					if (strcmp(line.c_str(), replaceString.c_str()) != 0) {
+						line = replaceString;
+						changed = true;
+					}
+				}
+				if (line.find("pause_nonactive = ") != string::npos) {
+					string replaceString = "pause_nonactive = \"false\"";
+					if (strcmp(line.c_str(), replaceString.c_str()) != 0) {
+						line = replaceString;
+						changed = true;
+					}
+				}
+				cfgOut.push_back(line);
+			}
+
+			cfgFileIn.close();
+
+			if (changed) {
+				ofstream cfgFileOut(cfgPath);
+				if (cfgFileOut.is_open()) {
+					for (auto it = cfgOut.begin(); it != cfgOut.end(); ++it) {
+						cfgFileOut << *it << endl;
+					}
 				}
 			}
-			if (line.find("video_scale = ") != string::npos) {
-				string replaceString = "video_scale = " + values[1];
-				if (strcmp(line.c_str(), replaceString.c_str()) != 0) {
-					line = replaceString;
-					changed = true;
-				}
-			}
-			if (line.find("pause_nonactive = ") != string::npos) {
-				string replaceString = "pause_nonactive = \"false\"";
-				if (strcmp(line.c_str(), replaceString.c_str()) != 0) {
-					line = replaceString;
-					changed = true;
-				}
-			}
-			cfgOut.push_back(line);
 		}
-
-		cfgFileIn.close();
-
-		if (changed) {
-			ofstream cfgFileOut(cfgPath);
-			if (cfgFileOut.is_open()) {
-				for (auto it = cfgOut.begin(); it != cfgOut.end(); ++it) {
-					cfgFileOut << *it << endl;
-				}
-			}
+	}
+	else {
+		ofstream cfgFileOut(cfgPath);
+		if (cfgFileOut.is_open()) {
+			cfgFileOut << "video_window_opacity = \"0\"" << endl << "video_scale = \"1.000000\"" << endl << "pause_nonactive = \"false\"";
 		}
 	}
 }
