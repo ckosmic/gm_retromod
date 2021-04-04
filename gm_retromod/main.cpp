@@ -43,7 +43,7 @@ bool g_downloading = false;
 bool g_captureLq = true;
 double g_aspectRatio = 1;
 
-Version g_version("1.0.1");
+Version g_version("1.0.3");
 
 bool IsRetroArchOpen() {
 	PROCESSENTRY32 entry;
@@ -558,6 +558,11 @@ LUA_FUNCTION(OpenDownloadLink) {
 	return 0;
 }
 
+LUA_FUNCTION(OpenWorkshopPage) {
+	ShellExecute(0, 0, "https://steamcommunity.com/sharedfiles/filedetails/?id=2438477032", 0, 0, SW_SHOW);
+	return 0;
+}
+
 void SetRetroArchConfigValues(vector<string> values) {
 	string cfgPath = "bin\\RetroArch\\retroarch.cfg";
 	if (std::experimental::filesystem::exists(cfgPath)) {
@@ -752,6 +757,8 @@ GMOD_MODULE_OPEN()
 	LUA->SetField(-2, "ReinitializeRetroArchWindow");
 	LUA->PushCFunction(DownloadUpdater);
 	LUA->SetField(-2, "DownloadUpdater");
+	LUA->PushCFunction(OpenWorkshopPage);
+	LUA->SetField(-2, "OpenWorkshopPage");
 
 	GdiplusStartup(&g_gdiplusToken, &g_gdiplusStartupInput, NULL);
 	WriteVersion();
